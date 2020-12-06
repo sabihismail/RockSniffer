@@ -2,6 +2,8 @@
 using RockSniffer.Addons;
 using RockSniffer.Addons.Storage;
 using RockSniffer.Configuration;
+using RockSniffer.CustomsForge;
+using RockSniffer.LastFM;
 using RockSniffer.RPC;
 using RockSnifferLib.Cache;
 using RockSnifferLib.Events;
@@ -40,6 +42,8 @@ namespace RockSniffer
         private RSMemoryReadout memReadout = new RSMemoryReadout();
         private SongDetails details = new SongDetails();
         private DiscordRPCHandler rpcHandler;
+        private LastFMHandler lastFMHandler;
+        private CustomsForgeHandler customsForgeHandler;
 
         static void Main(string[] args)
         {
@@ -196,6 +200,11 @@ namespace RockSniffer
 
             Logger.Log("Waiting for rocksmith");
 
+            if (config.customsForgeSettings.Enabled)
+            {
+                customsForgeHandler = new CustomsForgeHandler(cache as SQLiteCache);
+            }
+
             //Loop infinitely trying to find rocksmith process
             while (true)
             {
@@ -248,6 +257,11 @@ namespace RockSniffer
                 rpcHandler = new DiscordRPCHandler(sniffer);
             }
 
+            if (config.lastFMSettings.Enabled)
+            {
+                lastFMHandler = new LastFMHandler(sniffer);
+            }
+
             //Inform AddonService
             if (config.addonSettings.enableAddons && addonService != null)
             {
@@ -280,6 +294,11 @@ namespace RockSniffer
 
             rpcHandler?.Dispose();
             rpcHandler = null;
+
+            lastFMHandler?.Dispose();
+            lastFMHandler = null;
+
+            customsForgeHandler = null;
 
             Logger.Log("This is rather unfortunate, the Rocksmith2014 process has vanished :/");
         }

@@ -25,7 +25,7 @@ namespace RockSniffer
 {
     class Program
     {
-        internal const string version = "0.3.3_PR1_FSW_DBG";
+        internal const string version = "0.4.0";
 
         internal static ICache cache;
         internal static Config config;
@@ -61,7 +61,7 @@ namespace RockSniffer
                 {
                     //Catch all exceptions that are not handled and log
                     Logger.LogError("Encountered unhandled exception: {0}\r\n{1}", e.Message, e.StackTrace);
-                    throw e;
+                    throw;
                 }
             }
         }
@@ -81,20 +81,13 @@ namespace RockSniffer
             catch (Exception e)
             {
                 Logger.LogError("Could not load configuration: {0}\r\n{1}", e.Message, e.StackTrace);
-                throw e;
+                throw;
             }
 
             //Run version check
             if (!config.debugSettings.disableVersionCheck)
             {
-                if (version.Contains("PR"))
-                {
-                    Logger.Log("Pre-release version, skipping version check");
-                }
-                else
-                {
-                    VersionCheck();
-                }
+                VersionCheck();
             }
 
             //Transfer logging options
@@ -104,6 +97,7 @@ namespace RockSniffer
             Logger.logMemoryReadout = config.debugSettings.debugMemoryReadout;
             Logger.logSongDetails = config.debugSettings.debugSongDetails;
             Logger.logSystemHandleQuery = config.debugSettings.debugSystemHandleQuery;
+            Logger.logProcessingQueue = config.debugSettings.debugProcessingQueue;
 
             //Initialize cache
             cache = new SQLiteCache();
@@ -132,6 +126,12 @@ namespace RockSniffer
 
         private async void VersionCheck()
         {
+            if (version.Contains("PR"))
+            {
+                Logger.Log("Pre-release version, skipping version check");
+                return;
+            }
+            
             try
             {
                 //Use TLS
@@ -141,7 +141,7 @@ namespace RockSniffer
                 var request = WebRequest.CreateHttp("https://api.github.com/repos/kokolihapihvi/RockSniffer/releases/latest");
                 request.Accept = "application/vnd.github.v3+json";
                 request.Method = "GET";
-                request.UserAgent = ".NET WebRequest";
+                request.UserAgent = "RockSniffer";
 
                 //Get the response
                 using (var response = await request.GetResponseAsync())
@@ -159,6 +159,9 @@ namespace RockSniffer
                             //Parse response as JSON
                             var respjson = JObject.Parse(respstr);
 
+                            //Treat release body as a changelog
+                            var changes = respjson.Value<string>("body");
+
                             //Get the newest release tag name, remove v prefix
                             var newest_release = respjson.Value<string>("tag_name").Substring(1);
 
@@ -170,7 +173,7 @@ namespace RockSniffer
                             {
                                 case -1:
                                     Console.ForegroundColor = ConsoleColor.Green;
-                                    Logger.Log($"A new version ({newest_release}) of RockSniffer is available");
+                                    Logger.Log($"A new version ({newest_release}) of RockSniffer is available:\r\n{changes}");
                                     Console.ResetColor();
                                     break;
                                 case 0:
@@ -183,7 +186,10 @@ namespace RockSniffer
                     }
                 }
             }
-            catch (Exception e)
+            catch
+#if DEBUG
+            (Exception e)
+#endif
             {
                 Logger.LogError("Version check failed");
 
@@ -217,6 +223,16 @@ namespace RockSniffer
                     continue;
                 }
 
+                // Check for multiple Rocksmith processes
+                if (processes.Length > 1)
+                {
+                    Logger.LogError("Warning! More than one Rocksmith process found!");
+                    foreach (var process in processes)
+                    {
+                        Logger.LogError($"{process.ProcessName} [pid {process.Id}]");
+                    }
+                }
+
                 //Select the first rocksmith process and open a handle
                 rsProcess = processes[0];
 
@@ -236,7 +252,7 @@ namespace RockSniffer
 
             Logger.Log($"Rocksmith executable hash: {hash}");
 
-            if (!hash.Equals("GxT+/TXLpUFys+Cysek8zg=="))
+            if (!hash.Equals("HtUXPbqP7r9hrd5sRV8Seg=="))
             {
                 Logger.LogError("Executable hash does not match expected hash, make sure you have the correct version");
                 Logger.Log("Press any key to exit");

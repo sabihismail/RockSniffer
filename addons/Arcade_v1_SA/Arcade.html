@@ -3,7 +3,7 @@
 	<head>
 		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
 
-		<title>RockSniffer Current Song Display (Based on v2, edited by PoizenJam)</title>
+		<title>PoizenJam's Rocksniffer UI</title>
 
 		<link rel="stylesheet" type="text/css" href="style.css"> 
 		<link href="https://fonts.googleapis.com/css?family=Open+Sans" rel="stylesheet">
@@ -26,72 +26,66 @@
 							<div class="songMarquee" v-bind:style="{transform: songInfoTransform}">
 								<a class="artistName">{{song.artistName}}</a><a class = "tuningName"><a class="songDash"> - </a><a class="songName">{{song.songName}}</a>
 							</div>		
-							<transition mode="out-in" name="fade">
-								<div v-if="mode == 0" :key="'mode0'">
-									<div class = "stats">
-										<div class = "statsLeft">
-											<div class ="statsNAME">Score:</div>
-											<div class = "statsNUM">
-												<a v-if="readout.songTimer > 1" class="accuracy">{{notes.CurrentScore}}</a>
-												<a v-else class="accuracy"></a>
-											</div>
-										</div>
-										<div class = "statsRight">
-											<div class = "statsNAME">Notes:</div>
-											<div class = "statsNUM">
-												<a v-if="readout.songTimer > 1" class="accuracy">{{notes.TotalNotesHit}}/{{notes.TotalNotes}} ({{notes.Accuracy.toFixed(1)}}%)</a>
-												<a v-else class="accuracy"></a>
-											</div>
+							<div v-if="mode == 0" :key="'mode0'">
+								<div class = "stats">
+									<div class = "statsLeft">
+										<div class ="statsNAME">SCR:</div>
+										<div class = "statsNUM">
+											<div class="scrDisplay">{{scrDisplay}}</div>
 										</div>
 									</div>
-									<div class = "stats">
-										<div class = "statsLeft">
-											<div class ="statsNAME">Multiplier:</div>
-											<div class = "statsNUM">
-												<a v-if="readout.songTimer > 1" class="accuracy">{{notes.CurrentMultiplier}}x/{{notes.HighestMultiplier}}x</a>
-												<a v-else class="accuracy"></a>
-											</div>
-										</div>
-										<div class = "statsRight">
-											<div class = "statsNAME">Streak:</div>
-											<div class = "statsNUM">
-												<a v-if="readout.songTimer > 1" class="accuracy">{{notes.CurrentHitStreak}}/{{notes.HighestHitStreak}}</a>
-												<a v-else class="accuracy"></a>
-											</div>
+									<div class = "statsRight">
+										<div class = "statsNAME">HIT:</div>
+										<div class = "statsNUM">
+											<div class="hitDisplay">{{hitDisplay}}</div>
 										</div>
 									</div>
 								</div>
-								<div v-if="mode == 1" :key="'mode1'">
-									<div class = "stats">
-										<div class = "statsLeft">
-											<div class ="statsNAME">Score:</div>
-											<div class = "statsNUM">
-												<a class="accuracy">{{prevNotes.CurrentScore}}</a>
-											</div>
-										</div>
-										<div class = "statsRight">
-											<div class = "statsNAME">Notes:</div>
-											<div class = "statsNUM">
-												<a class="accuracy">{{prevNotes.TotalNotesHit}}/{{prevNotes.TotalNotes}} ({{prevNotes.Accuracy.toFixed(1)}}%)</a>
-											</div>
+								<div class = "stats">
+									<div class = "statsLeft">
+										<div class ="statsNAME">MLT:</div>
+										<div class = "statsNUM">
+											<div class="mltDisplay">{{mltDisplay}}</div>
 										</div>
 									</div>
-									<div class = "stats">
-										<div class = "statsLeft">
-											<div class ="statsNAME">Best Multiplier:</div>
-											<div class = "statsNUM">
-												<a class="accuracy">{{prevNotes.HighestMultiplier}}x</a>
-											</div>
-										</div>
-										<div class = "statsRight">
-											<div class = "statsNAME">Best Streak:</div>
-											<div class = "statsNUM">
-												<a class="accuracy">{{prevNotes.HighestHitStreak}}</a>
-											</div>
+									<div class = "statsRight">
+										<div class = "statsNAME">STR:</div>
+										<div class = "statsNUM">
+											<div class="strDisplay">{{strDisplay}}</div>
 										</div>
 									</div>
 								</div>
-							</transition>
+							</div>
+							<div v-if="mode == 1" :key="'mode1'">
+								<div class = "stats">
+									<div class = "statsLeft">
+										<div class ="statsNAME">SCR:</div>
+										<div class = "statsNUM">
+											<div class="scrDisplay">{{scrDisplayF}}</div>
+										</div>
+									</div>
+									<div class = "statsRight">
+										<div class = "statsNAME">HIT:</div>
+										<div class = "statsNUM">
+											<div class="hitDisplay">{{hitDisplayF}}</div>
+										</div>
+									</div>
+								</div>
+								<div class = "stats">
+									<div class = "statsLeft">
+										<div class ="statsNAME">MLT:</div>
+										<div class = "statsNUM">
+											<div class="mltDisplay">{{mltDisplayF}}</div>
+										</div>
+									</div>
+									<div class = "statsRight">
+										<div class = "statsNAME">STR:</div>
+										<div class = "statsNUM">
+											<div class="strDisplay">{{strDisplayF}}</div>
+										</div>
+									</div>
+								</div>
+							</div>
 							<div class="timer">
 								<div class="timerBar">
 									<div class="timerBarPhrase" v-bind:style="phrase.style" v-bind:key="'phrase'+index" v-for="(phrase,index) in phraseIterations"></div>

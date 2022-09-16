@@ -1,27 +1,24 @@
 ﻿using System;
-using System.Linq;
-using System.Threading;
 using IF.Lastfm.Core.Api;
 using IF.Lastfm.Core.Objects;
 using RockSnifferLib.Events;
 using RockSnifferLib.Logging;
 using RockSnifferLib.Sniffing;
-using Microsoft.VisualBasic;
 using RockSnifferLib.RSHelpers;
 
 namespace RockSniffer.LastFM
 {
     public class LastFMHandler : IDisposable
     {
-        private static readonly object Mutex = new object();
+        private static readonly object Mutex = new();
 
         private const string SECRET = "";
 
         private readonly LastfmClient Client;
-        private RSMemoryReadout Readout;
+        private RSMemoryReadout? Readout;
         private SnifferState State;
-        private SongDetails SongDetails;
-        private Scrobble LastScrobbled;
+        private SongDetails? SongDetails;
+        private Scrobble? LastScrobbled;
         private bool Scrobbled;
 
         public LastFMHandler(Sniffer sniffer)
@@ -35,13 +32,15 @@ namespace RockSniffer.LastFM
                 var username = Program.config.lastFMSettings.LAST_FM_USERNAME;
                 while (string.IsNullOrWhiteSpace(username))
                 {
-                    username = Interaction.InputBox("Last.FM Username");
+                    Console.WriteLine("Last.FM Username: ");
+                    username = Console.ReadLine()?.Trim();
                 }
 
                 var password = "";
                 while (string.IsNullOrWhiteSpace(password))
                 {
-                    password = Interaction.InputBox("Last.FM Password");
+                    Console.WriteLine("Last.FM Password: ");
+                    password = Console.ReadLine()?.Trim();
                 }
 
                 var passwordHashed = Crypto.EncryptStringAES(password, username + SECRET);

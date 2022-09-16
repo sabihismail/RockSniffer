@@ -17,16 +17,16 @@ namespace RockSniffer.CustomsForge
     {
         private const string USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:83.0) Gecko/20100101 Firefox/83.0";
 
-        private static readonly CookieContainer CookieContainer = new CookieContainer();
-        private static readonly HttpClientHandler Handler = new HttpClientHandler { CookieContainer = CookieContainer };
-        private static readonly HttpClient Client = new HttpClient(Handler);
+        private static readonly CookieContainer CookieContainer = new();
+        private static readonly HttpClientHandler Handler = new() { CookieContainer = CookieContainer };
+        private static readonly HttpClient Client = new();
 
-        private readonly CustomsForgeDatabase SavedDatabase = new CustomsForgeDatabase();
+        private readonly CustomsForgeDatabase SavedDatabase = new();
         private readonly SQLiteCache DatabaseCache;
 
-        private readonly List<int> ToUpdate = new List<int>();
-        private readonly List<string> CreatorsToIgnore;
-        private readonly List<string> FoldersToIgnore;
+        private readonly List<int> ToUpdate = new();
+        private readonly List<string> CreatorsToIgnore = new();
+        private readonly List<string> FoldersToIgnore = new();
 
         private static int currentJobs;
 
@@ -120,17 +120,17 @@ namespace RockSniffer.CustomsForge
         {
             var queryID = await GetQueryID(name, queryType);
 
-            if (queryID.Results.Length == 0)
+            if (queryID?.Results?.Length == 0)
             {
                 Decrement();
                 return; 
             }
 
-            var entries = await GetCustomsForgeEntries(queryID.Results.First().ID, queryType);
+            var entries = await GetCustomsForgeEntries(queryID?.Results?.First().ID ?? 0, queryType) ?? new List<CustomsForgeQueryData>();
 
             foreach (var entry in entries)
             {
-                if (CreatorsToIgnore.Contains(entry.Artist)) continue;
+                if (CreatorsToIgnore.Contains(entry.Artist ?? "")) continue;
                 if (string.IsNullOrEmpty(entry.URL)) continue;
 
                 var stringFormat = Program.config.customsForgeSettings.NewSongFormat;
@@ -160,7 +160,7 @@ namespace RockSniffer.CustomsForge
             Thread.Sleep(200);
         }
 
-        private async Task<CustomsForgeArtistResults> GetQueryID(string name, CustomsForgeQueryType queryType)
+        private async Task<CustomsForgeArtistResults?> GetQueryID(string name, CustomsForgeQueryType queryType)
         {
             string searchType;
 
@@ -221,7 +221,7 @@ namespace RockSniffer.CustomsForge
                         break;
 
                     default:
-                        value = valueObj.ToString();
+                        value = valueObj?.ToString() ?? "";
                         break;
                 }
 
@@ -241,7 +241,7 @@ namespace RockSniffer.CustomsForge
             }
         }
 
-        private async Task<List<CustomsForgeQueryData>> GetCustomsForgeEntries(int queryID, CustomsForgeQueryType queryType)
+        private async Task<List<CustomsForgeQueryData>?> GetCustomsForgeEntries(int queryID, CustomsForgeQueryType queryType)
         {
             var url = $"https://ignition4.customsforge.com/?draw=1&columns[0][data]=addBtn&columns[0][searchable]=false&columns[0][orderable]=false&columns[1][data]=artistName&columns[2][data]=titleName&columns[3][data]=albumName&columns[4][data]=year&columns[5][data]=duration&columns[5][orderable]=false&columns[6][data]=tunings&columns[6][searchable]=false&columns[6][orderable]=false&columns[7][data]=version&columns[7][searchable]=false&columns[7][orderable]=false&columns[8][data]=author.name&columns[9][data]=created_at&columns[9][searchable]=false&columns[10][data]=updated_at&columns[10][searchable]=false&columns[11][data]=downloads&columns[11][searchable]=false&columns[12][data]=parts&columns[12][orderable]=false&columns[13][data]=platforms&columns[13][orderable]=false&columns[14][data]=file_pc_link&columns[14][searchable]=false&columns[15][data]=file_mac_link&columns[15][searchable]=false&columns[16][data]=artist.name&columns[17][data]=title&columns[18][data]=album&order[0][column]=10&order[0][dir]=desc&start=0&length=25&search[value]=&filter_title=&filter_album=&filter_start_year=&filter_end_year=&filter_preferred=&filter_official=&filter_disable=&filter_hidden=&_=1607221637930";
 
@@ -290,7 +290,7 @@ namespace RockSniffer.CustomsForge
                 }
 
                 var json = JsonConvert.DeserializeObject<CustomsForgeQueryResult>(content);
-                var customsForgeQueryResults = json.Data;
+                var customsForgeQueryResults = json?.Data;
 
                 var dateToStartByStr = Program.config.customsForgeSettings.DateToStartBy;
                 if (!string.IsNullOrEmpty(dateToStartByStr))
@@ -300,10 +300,10 @@ namespace RockSniffer.CustomsForge
                         Logger.LogError("[CustomsForge] The date that was inputted is incorrect. Use the format 'yyyy-mm-dd'.");
                     }
 
-                    customsForgeQueryResults = customsForgeQueryResults.FindAll(x => x.ModifiedDate > dateToStartBy);
+                    customsForgeQueryResults = customsForgeQueryResults?.FindAll(x => x.ModifiedDate > dateToStartBy);
                 }
 
-                customsForgeQueryResults = customsForgeQueryResults.FindAll(x =>
+                customsForgeQueryResults = customsForgeQueryResults?.FindAll(x =>
                 {
                     var handled = SavedDatabase.IsAlreadyHandled(x.ID, x.ModifiedDate);
 
@@ -362,7 +362,7 @@ namespace RockSniffer.CustomsForge
         public class CustomsForgeArtistResults
         {
             [JsonProperty("results")]
-            public CustomsForgeArtistResult[] Results { get; set; }
+            public CustomsForgeArtistResult[]? Results { get; set; }
         }
 
         public class CustomsForgeArtistResult
@@ -371,7 +371,7 @@ namespace RockSniffer.CustomsForge
             public int ID { get; set; }
 
             [JsonProperty("text")]
-            public string Text { get; set; }
+            public string? Text { get; set; }
         }
 
         public class CustomsForgeQueryResult
@@ -383,7 +383,7 @@ namespace RockSniffer.CustomsForge
             public int RecordsFiltered { get; set; }
 
             [JsonProperty("data")]
-            public List<CustomsForgeQueryData> Data { get; set; }
+            public List<CustomsForgeQueryData>? Data { get; set; }
         }
 
         public class CustomsForgeQueryArtist
@@ -392,7 +392,7 @@ namespace RockSniffer.CustomsForge
             public int ID { get; set; }
 
             [JsonProperty("name")]
-            public string Name { get; set; }
+            public string? Name { get; set; }
         }
 
         public class CustomsForgeQueryAuthor
@@ -401,7 +401,7 @@ namespace RockSniffer.CustomsForge
             public int ID { get; set; }
 
             [JsonProperty("name")]
-            public string Name { get; set; }
+            public string? Name { get; set; }
         }
 
         public class CustomsForgeQueryData
@@ -410,48 +410,48 @@ namespace RockSniffer.CustomsForge
             public int ID { get; set; }
 
             [JsonProperty("artist")]
-            public CustomsForgeQueryArtist ArtistObj { get; set; }
+            public CustomsForgeQueryArtist? ArtistObj { get; set; }
 
             [JsonProperty("author")]
-            public CustomsForgeQueryArtist AuthorObj { get; set; }
+            public CustomsForgeQueryArtist? AuthorObj { get; set; }
 
             [JsonProperty("title")]
-            public string Title { get; set; }
+            public string? Title { get; set; }
 
             [JsonProperty("album")]
-            public string Album { get; set; }
+            public string? Album { get; set; }
 
             [JsonProperty("lead")]
-            public string Lead { get; set; }
+            public string? Lead { get; set; }
 
             [JsonProperty("rhythm")]
-            public string Rhythm { get; set; }
+            public string? Rhythm { get; set; }
 
             [JsonProperty("bass")]
-            public string Bass { get; set; }
+            public string? Bass { get; set; }
 
             [JsonProperty("created_at")]
-            public string CreationDateImpl { get; set; }
+            public string? CreationDateImpl { get; set; }
 
             [JsonProperty("updated_at")]
-            public string ModifiedDateImpl { get; set; }
+            public string? ModifiedDateImpl { get; set; }
 
             [JsonProperty("downloads")]
-            public int Downloads { get; set; }
+            public int? Downloads { get; set; }
 
             [JsonProperty("has_lyrics")]
-            public bool IsVocals { get; set; }
+            public bool? IsVocals { get; set; }
 
             [JsonProperty("file_pc_link")]
-            public string URL { get; set; }
+            public string? URL { get; set; }
 
-            public string Artist => ArtistObj.Name;
+            public string? Artist => ArtistObj?.Name;
 
-            public string Author => AuthorObj.Name;
+            public string? Author => AuthorObj?.Name;
 
-            public DateTimeOffset CreationDate => DateTimeOffset.ParseExact(CreationDateImpl, "MM/dd/yyyy", CultureInfo.InvariantCulture);
+            public DateTimeOffset CreationDate => DateTimeOffset.ParseExact(CreationDateImpl ?? "01/01/2023", "MM/dd/yyyy", CultureInfo.InvariantCulture);
 
-            public DateTimeOffset ModifiedDate => DateTimeOffset.ParseExact(ModifiedDateImpl, "MM/dd/yyyy", CultureInfo.InvariantCulture);
+            public DateTimeOffset ModifiedDate => DateTimeOffset.ParseExact(ModifiedDateImpl ?? "01/01/2023", "MM/dd/yyyy", CultureInfo.InvariantCulture);
 
             public bool IsLead => !string.IsNullOrWhiteSpace(Lead);
 

@@ -28,23 +28,19 @@ namespace RockSniffer.CustomsForge
         {
             var q = @"SELECT * FROM `songs` WHERE `song_id` = @id";
 
-            using (var cmd = Connection.CreateCommand())
+            using var cmd = Connection.CreateCommand();
+            cmd.CommandText = q;
+            cmd.Parameters.AddWithValue("@id", id);
+
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
             {
-                cmd.CommandText = q;
-                cmd.Parameters.AddWithValue("@id", id);
+                var entryModifiedDate = DateTimeOffset.FromUnixTimeSeconds(reader.GetInt32(reader.GetOrdinal("modified_date")));
 
-                using (var reader = cmd.ExecuteReader())
-                {
-                    while (reader.Read())
-                    {
-                        var entryModifiedDate = DateTimeOffset.FromUnixTimeSeconds(reader.GetInt32(reader.GetOrdinal("modified_date")));
-
-                        return modifiedDate > entryModifiedDate ? Handled.OUTDATED : Handled.HANDLED;
-                    }
-                }
-
-                return Handled.NOT_HANDLED;
+                return modifiedDate > entryModifiedDate ? Handled.OUTDATED : Handled.HANDLED;
             }
+
+            return Handled.NOT_HANDLED;
         }
 
         public void AddSongEntry(CustomsForgeHandler.CustomsForgeQueryData result)

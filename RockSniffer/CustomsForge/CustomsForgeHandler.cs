@@ -4,9 +4,11 @@ using System.Globalization;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
+using RockSniffer.Util;
 using RockSnifferLib.Cache;
 using RockSnifferLib.Logging;
 using Exception = System.Exception;
@@ -17,9 +19,8 @@ namespace RockSniffer.CustomsForge
     {
         private const string USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:83.0) Gecko/20100101 Firefox/83.0";
 
-        private static readonly CookieContainer CookieContainer = new();
-        private static readonly HttpClientHandler Handler = new() { CookieContainer = CookieContainer };
-        private static readonly HttpClient Client = new();
+        private static readonly HttpClientHandler Handler = new() { UseCookies = true, CookieContainer = new() };
+        private static readonly HttpClient Client = new(Handler);
 
         private readonly CustomsForgeDatabase SavedDatabase = new();
         private readonly SQLiteCache DatabaseCache;
@@ -34,23 +35,14 @@ namespace RockSniffer.CustomsForge
         {
             DatabaseCache = databaseCache;
 
-            Logger.Log("[CustomsForge] Checking for new songs...");
-
-            var cookies = Program.config.customsForgeSettings.Cookie;
-
-            if (string.IsNullOrEmpty(cookies))
+            if (string.IsNullOrEmpty(Program.config.customsForgeSettings.Username) || string.IsNullOrEmpty(Program.config.customsForgeSettings.Password))
             {
-                Logger.LogError(
-                    "[CustomsForge] You need to set the cookie. To do this, open up your browser and click 'CTRL+SHIFT+I'. " +
-                    "Click on the tab at the top that says 'Network' (if you don't see it, click on the expansion arrow on the right side of the top bar) and select 'All' as the subheading. " +
-                    "Load up 'http://ignition.customsforge.com' and ensure you are still in the Network tab. Look for the entry that says '200 POST' and click it. On the right you should see some headings. " +
-                    "Go under 'Request headers' and copy the value after the 'Cookie:' entry. Ensure you copy it in it's entirety (click on it and click CTRL+A and CTRL+C to copy). " +
-                    "Paste that after the 'cookie:' part in the config file named 'customsForge.json'.");
+                Logger.LogError("[CustomsForge] You need to set your username + password!. Paste your credentials in the config file named 'customsForge.json'.");
 
                 return;
             }
 
-            SetUpCookieContainer(cookies);
+            Logger.Log("[CustomsForge] Checking for new songs...");
 
             Client.DefaultRequestHeaders.UserAgent.ParseAdd(USER_AGENT);
             Client.DefaultRequestHeaders.Accept.ParseAdd("application/json, text/javascript, */*; q=0.01");
@@ -67,7 +59,80 @@ namespace RockSniffer.CustomsForge
                 .ToList()
                 .FindAll(x => !string.IsNullOrEmpty(x));
 
+            Login();
             CheckForNewSongs();
+        }
+
+        private static void AskForCredentials(bool force = false)
+        {
+            Logger.Log("[CustomsForge] CustomsForge Enabled but no user credentials exist.");
+
+            var username = !force ? Program.config.customsForgeSettings.Username : "";
+            while (string.IsNullOrWhiteSpace(username))
+            {
+                Console.WriteLine("CustomsForge Username: ");
+                username = Console.ReadLine()?.Trim();
+            }
+
+            var password = "";
+            while (string.IsNullOrWhiteSpace(password))
+            {
+                Console.WriteLine("CustomsForge Password: ");
+                password = Console.ReadLine()?.Trim();
+            }
+
+            var passwordHashed = Crypto.EncryptStringAES(password, username + Utils.GetHardwareHash());
+
+            Program.config.customsForgeSettings.Username = username;
+            Program.config.customsForgeSettings.Password = passwordHashed;
+
+            Program.config.SaveCustomsForgeSettings();
+        }
+
+        private static async void Login()
+        {
+            if (string.IsNullOrWhiteSpace(Program.config.customsForgeSettings.Username) || string.IsNullOrWhiteSpace(Program.config.customsForgeSettings.Password))
+            {
+                AskForCredentials();
+            }
+
+            string passwordUnhashed;
+            try
+            {
+                passwordUnhashed = Crypto.DecryptStringAES(Program.config.customsForgeSettings.Password, Program.config.customsForgeSettings.Username + Utils.GetHardwareHash());
+            }
+            catch
+            {
+                AskForCredentials(true);
+
+                passwordUnhashed = Crypto.DecryptStringAES(Program.config.customsForgeSettings.Password, Program.config.customsForgeSettings.Username + Utils.GetHardwareHash());
+            }
+
+            using var initialRequest = new HttpRequestMessage
+            {
+                RequestUri = new Uri("https://customsforge.com/"),
+                Method = HttpMethod.Get
+            };
+            var initialResponse = await Client.SendAsync(initialRequest);
+            var regularHomePage = await initialResponse.Content.ReadAsStringAsync();
+
+            var regex = new Regex(@".*csrfKey=([^"";]*).*", RegexOptions.Multiline);
+            var csrfKey = regex.Match(regularHomePage).Groups[1].Value;
+
+            var url = $"https://customsforge.com/index.php?/login/";
+
+            using var request = new HttpRequestMessage
+            {
+                RequestUri = new Uri(url),
+                Method = HttpMethod.Post,
+                Content = new StringContent($"csrfKey={csrfKey}&auth={Program.config.customsForgeSettings.Username}&password={passwordUnhashed}&remember_me=1&_processLogin=usernamepassword")
+            };
+            var response = await Client.SendAsync(request);
+
+            if (response.StatusCode != HttpStatusCode.OK)
+            {
+                Console.WriteLine("[CustomsForge] Login failed!");
+            }
         }
 
         private void CheckForNewSongs()
@@ -179,20 +244,20 @@ namespace RockSniffer.CustomsForge
 
             var url = $"https://ignition4.customsforge.com/cdlc/search/{searchType}?term={name}&_type=query&q={name}";
 
-            using (var request = new HttpRequestMessage
+            using var request = new HttpRequestMessage
             {
                 RequestUri = new Uri(url),
-                Method = HttpMethod.Get
-            })
-            {
-                var response = await Client.SendAsync(request);
+                Method = HttpMethod.Get,
+            };
+            var response = await Client.SendAsync(request);
 
-                var str = await response.Content.ReadAsStringAsync();
+            var str = await response.Content.ReadAsStringAsync();
 
-                var json = JsonConvert.DeserializeObject<CustomsForgeArtistResults>(str);
+            var cookies = Handler.CookieContainer.GetAllCookies();
 
-                return json;
-            }
+            var json = JsonConvert.DeserializeObject<CustomsForgeArtistResults>(str);
+
+            return json;
         }
 
         private static string Format(string format, CustomsForgeQueryData query)
@@ -325,25 +390,6 @@ namespace RockSniffer.CustomsForge
                 });
 
                 return customsForgeQueryResults;
-            }
-        }
-
-        private static void SetUpCookieContainer(string cookies)
-        {
-            var splitCookies = cookies.Split(';')
-                .Select(x => x.Trim());
-
-            foreach (var cookie in splitCookies)
-            {
-                var split = cookie.Split(new[] { '=' }, 2);
-
-                if (split.Length != 2) continue;
-
-                var key = split[0].Trim();
-                var value = split[1].Trim();
-
-                CookieContainer.Add(new Uri("http://ignition4.customsforge.com"), new Cookie(key, value));
-                CookieContainer.Add(new Uri("http://customsforge.com"), new Cookie(key, value));
             }
         }
 

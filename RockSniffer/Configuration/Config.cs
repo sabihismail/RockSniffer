@@ -86,5 +86,10 @@ namespace RockSniffer.Configuration
         {
             File.WriteAllText(cfiledir + lastFMFile, JsonConvert.SerializeObject(lastFMSettings, Formatting.Indented));
         }
+
+        public void SaveCustomsForgeSettings()
+        {
+            File.WriteAllText(cfiledir + customsForgeFile, JsonConvert.SerializeObject(customsForgeSettings, Formatting.Indented));
+        }
     }
 }

@@ -19,7 +19,7 @@ namespace RockSniffer.CustomsForge
     {
         private const string USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:83.0) Gecko/20100101 Firefox/83.0";
 
-        private static readonly HttpClientHandler Handler = new() { UseCookies = true, CookieContainer = new() };
+        private static readonly HttpClientHandler Handler = new() { UseCookies = true, CookieContainer = new(), };
         private static readonly HttpClient Client = new(Handler);
 
         private readonly CustomsForgeDatabase SavedDatabase = new();
@@ -59,7 +59,7 @@ namespace RockSniffer.CustomsForge
                 .ToList()
                 .FindAll(x => !string.IsNullOrEmpty(x));
 
-            Login();
+            Login().Wait();
             CheckForNewSongs();
         }
 
@@ -89,7 +89,7 @@ namespace RockSniffer.CustomsForge
             Program.config.SaveCustomsForgeSettings();
         }
 
-        private static async void Login()
+        private static async Task Login()
         {
             if (string.IsNullOrWhiteSpace(Program.config.customsForgeSettings.Username) || string.IsNullOrWhiteSpace(Program.config.customsForgeSettings.Password))
             {
@@ -111,7 +111,7 @@ namespace RockSniffer.CustomsForge
             using var initialRequest = new HttpRequestMessage
             {
                 RequestUri = new Uri("https://customsforge.com/"),
-                Method = HttpMethod.Get
+                Method = HttpMethod.Get,
             };
             var initialResponse = await Client.SendAsync(initialRequest);
             var regularHomePage = await initialResponse.Content.ReadAsStringAsync();
@@ -121,12 +121,23 @@ namespace RockSniffer.CustomsForge
 
             var url = $"https://customsforge.com/index.php?/login/";
 
-            using var request = new HttpRequestMessage
+            var postData = new Dictionary<string, string>
             {
-                RequestUri = new Uri(url),
-                Method = HttpMethod.Post,
-                Content = new StringContent($"csrfKey={csrfKey}&auth={Program.config.customsForgeSettings.Username}&password={passwordUnhashed}&remember_me=1&_processLogin=usernamepassword")
+                { "csrfKey", csrfKey },
+                { "auth", Program.config.customsForgeSettings.Username },
+                { "password", passwordUnhashed },
+                { "remember_me", "1" },
+                { "_processLogin", "usernamepassword" },
             };
+            using var content = new FormUrlEncodedContent(postData);
+            content.Headers.Clear();
+            content.Headers.Add("Content-Type", "application/x-www-form-urlencoded");
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, url)
+            { 
+                Content = content
+            };
+
             var response = await Client.SendAsync(request);
 
             if (response.StatusCode != HttpStatusCode.OK)
@@ -244,16 +255,10 @@ namespace RockSniffer.CustomsForge
 
             var url = $"https://ignition4.customsforge.com/cdlc/search/{searchType}?term={name}&_type=query&q={name}";
 
-            using var request = new HttpRequestMessage
-            {
-                RequestUri = new Uri(url),
-                Method = HttpMethod.Get,
-            };
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
             var response = await Client.SendAsync(request);
 
             var str = await response.Content.ReadAsStringAsync();
-
-            var cookies = Handler.CookieContainer.GetAllCookies();
 
             var json = JsonConvert.DeserializeObject<CustomsForgeArtistResults>(str);
 

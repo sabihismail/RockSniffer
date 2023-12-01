@@ -6,7 +6,6 @@ namespace RockSniffer.Configuration
     public class CustomsForgeSettings
     {
         public bool Enabled = false;
-        public string Cookie = "";
         public string Username = "";
         public string Password = "";
         public string DateToStartBy = "2019-01-01"; // songs before this date will be ignored. format: yyyy-mm-dd

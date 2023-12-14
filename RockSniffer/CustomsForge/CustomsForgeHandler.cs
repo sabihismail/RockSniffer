@@ -4,9 +4,11 @@ using System.Globalization;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Web;
 using Newtonsoft.Json;
 using RockSniffer.Util;
 using RockSnifferLib.Cache;
@@ -65,7 +67,7 @@ namespace RockSniffer.CustomsForge
 
         private static void AskForCredentials(bool force = false)
         {
-            Logger.Log("[CustomsForge] CustomsForge Enabled but no user credentials exist.");
+            Logger.LogError("[CustomsForge] CustomsForge Enabled but no user credentials exist.");
 
             var username = !force ? Program.config.customsForgeSettings.Username : "";
             while (string.IsNullOrWhiteSpace(username))
@@ -142,7 +144,7 @@ namespace RockSniffer.CustomsForge
 
             if (response.StatusCode != HttpStatusCode.OK)
             {
-                Console.WriteLine("[CustomsForge] Login failed!");
+                Logger.LogError("[CustomsForge] Login failed!");
             }
         }
 
@@ -202,7 +204,14 @@ namespace RockSniffer.CustomsForge
                 return; 
             }
 
-            var entries = await GetCustomsForgeEntries(queryID?.Results?.First().ID ?? 0, queryType) ?? new List<CustomsForgeQueryData>();
+            var id = queryID?.Results?.First().ID;
+            if (id == null)
+            {
+                Logger.LogError($"[CustomsForge] Couldn't parse {name}");
+                return;
+            }
+
+            var entries = await GetCustomsForgeEntries(id.Value, queryType) ?? new List<CustomsForgeQueryData>();
 
             foreach (var entry in entries)
             {
@@ -218,9 +227,16 @@ namespace RockSniffer.CustomsForge
                 }
                 else
                 {
-                    var formatted = Format(stringFormat, entry);
+                    try
+                    {
+                        var formatted = Format(stringFormat, entry);
 
-                    Logger.Log(formatted);
+                        Logger.Log(formatted);
+                    }
+                    catch
+                    {
+                        Logger.LogError($"[CustomsForgeHandler] Error parsing entry: song: {entry.ID} - artist: {id}");
+                    }
                 }
 
                 SavedDatabase.AddSongEntry(entry);
@@ -273,28 +289,13 @@ namespace RockSniffer.CustomsForge
             {
                 var key = "%" + property.Name;
                 var valueObj = property.GetValue(query, null);
-
-                string value;
-
-                switch (valueObj)
+                string value = valueObj switch
                 {
-                    case null:
-                        value = string.Empty;
-                        break;
-
-                    case bool valueBool:
-                        value = valueBool ? "Yes" : "No";
-                        break;
-
-                    case DateTimeOffset valueDateTimeOffset:
-                        value = valueDateTimeOffset.ToString("yyyy-MM-dd");
-                        break;
-
-                    default:
-                        value = valueObj?.ToString() ?? "";
-                        break;
-                }
-
+                    null => string.Empty,
+                    bool valueBool => valueBool ? "Yes" : "No",
+                    DateTimeOffset valueDateTimeOffset => valueDateTimeOffset.ToString("yyyy-MM-dd"),
+                    _ => HttpUtility.HtmlDecode(valueObj?.ToString() ?? "").Replace("{", "[").Replace("}", "]"),
+                };
                 output = output.Replace(key, value);
             }
 
@@ -328,7 +329,7 @@ namespace RockSniffer.CustomsForge
                 throw new ArgumentException("Invalid Query Type.");
             }
 
-            using (var request = new HttpRequestMessage
+            using var request = new HttpRequestMessage
             {
                 RequestUri = new Uri(url),
                 Method = HttpMethod.Get,
@@ -337,65 +338,63 @@ namespace RockSniffer.CustomsForge
                     { HttpRequestHeader.Accept.ToString(), "application/json" },
                     { "X-Requested-With", "XMLHttpRequest" }
                 }
-            })
+            };
+            string content;
+            try
             {
-                string content;
-                try
-                {
-                    var response = await Client.SendAsync(request);
-                    content = await response.Content.ReadAsStringAsync();
-                }
-                catch (Exception e)
-                {
-                    Logger.LogError("[CustomsForge] Something went wrong communicating with the CustomsForge servers. Error: \n" + e);
-
-                    return new List<CustomsForgeQueryData>();
-                }
-
-                if (content.StartsWith("<!DOCTYPE html>"))
-                {
-                    Logger.LogError("[CustomsForge] Something went wrong. Output:\n\n" + content);
-
-                    return new List<CustomsForgeQueryData>();
-                }
-
-                var json = JsonConvert.DeserializeObject<CustomsForgeQueryResult>(content);
-                var customsForgeQueryResults = json?.Data;
-
-                var dateToStartByStr = Program.config.customsForgeSettings.DateToStartBy;
-                if (!string.IsNullOrEmpty(dateToStartByStr))
-                {
-                    if (!DateTimeOffset.TryParse(dateToStartByStr, out var dateToStartBy))
-                    {
-                        Logger.LogError("[CustomsForge] The date that was inputted is incorrect. Use the format 'yyyy-mm-dd'.");
-                    }
-
-                    customsForgeQueryResults = customsForgeQueryResults?.FindAll(x => x.ModifiedDate > dateToStartBy);
-                }
-
-                customsForgeQueryResults = customsForgeQueryResults?.FindAll(x =>
-                {
-                    var handled = SavedDatabase.IsAlreadyHandled(x.ID, x.ModifiedDate);
-
-                    switch (handled)
-                    {
-                        case CustomsForgeDatabase.Handled.NOT_HANDLED:
-                            return true;
-
-                        case CustomsForgeDatabase.Handled.OUTDATED:
-                            ToUpdate.Add(x.ID);
-                            return true;
-
-                        case CustomsForgeDatabase.Handled.HANDLED:
-                            return false;
-
-                        default:
-                            return false;
-                    }
-                });
-
-                return customsForgeQueryResults;
+                var response = await Client.SendAsync(request);
+                content = await response.Content.ReadAsStringAsync();
             }
+            catch (Exception e)
+            {
+                Logger.LogError("[CustomsForge] Something went wrong communicating with the CustomsForge servers. Error: \n" + e);
+
+                return new List<CustomsForgeQueryData>();
+            }
+
+            if (content.StartsWith("<!DOCTYPE html>"))
+            {
+                Logger.LogError("[CustomsForge] Something went wrong. Output:\n\n" + content);
+
+                return new List<CustomsForgeQueryData>();
+            }
+
+            var json = JsonConvert.DeserializeObject<CustomsForgeQueryResult>(content);
+            var customsForgeQueryResults = json?.Data;
+
+            var dateToStartByStr = Program.config.customsForgeSettings.DateToStartBy;
+            if (!string.IsNullOrEmpty(dateToStartByStr))
+            {
+                if (!DateTimeOffset.TryParse(dateToStartByStr, out var dateToStartBy))
+                {
+                    Logger.LogError("[CustomsForge] The date that was inputted is incorrect. Use the format 'yyyy-mm-dd'.");
+                }
+
+                customsForgeQueryResults = customsForgeQueryResults?.FindAll(x => x.ModifiedDate > dateToStartBy);
+            }
+
+            customsForgeQueryResults = customsForgeQueryResults?.FindAll(x =>
+            {
+                var handled = SavedDatabase.IsAlreadyHandled(x.ID, x.ModifiedDate);
+
+                switch (handled)
+                {
+                    case CustomsForgeDatabase.Handled.NOT_HANDLED:
+                        return true;
+
+                    case CustomsForgeDatabase.Handled.OUTDATED:
+                        ToUpdate.Add(x.ID);
+                        return true;
+
+                    case CustomsForgeDatabase.Handled.HANDLED:
+                        return false;
+
+                    default:
+                        return false;
+                }
+            });
+
+            return customsForgeQueryResults;
         }
 
         public void Dispose()
@@ -444,6 +443,11 @@ namespace RockSniffer.CustomsForge
 
             [JsonProperty("name")]
             public string? Name { get; set; }
+
+            public override string ToString()
+            {
+                return Name ?? "";
+            }
         }
 
         public class CustomsForgeQueryAuthor
@@ -453,6 +457,11 @@ namespace RockSniffer.CustomsForge
 
             [JsonProperty("name")]
             public string? Name { get; set; }
+
+            public override string ToString()
+            {
+                return Name ?? "";
+            }
         }
 
         public class CustomsForgeQueryData

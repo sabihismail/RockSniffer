@@ -19,7 +19,7 @@ namespace RockSniffer.CustomsForge
 {
     public class CustomsForgeHandler : IDisposable
     {
-        private const string USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:83.0) Gecko/20100101 Firefox/83.0";
+        private const string USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36";
 
         private static readonly HttpClientHandler Handler = new() { UseCookies = true, CookieContainer = new(), };
         private static readonly HttpClient Client = new(Handler);

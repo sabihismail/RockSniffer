@@ -5,7 +5,7 @@ using RockSnifferLib.Events;
 using RockSnifferLib.Logging;
 using RockSnifferLib.Sniffing;
 using RockSnifferLib.RSHelpers;
-using RockSniffer.Util;
+using RockSniffer.Configuration;
 
 namespace RockSniffer.LastFM
 {
@@ -22,9 +22,9 @@ namespace RockSniffer.LastFM
 
         public LastFMHandler(Sniffer sniffer)
         {
-            Client = new LastfmClient(Program.config.lastFMSettings.LAST_FM_API_KEY, Program.config.lastFMSettings.LAST_FM_API_SECRET);
+            Client = new LastfmClient(ConfigExt.LastFMSettings.LAST_FM_API_KEY, ConfigExt.LastFMSettings.LAST_FM_API_SECRET);
 
-            if (string.IsNullOrWhiteSpace(Program.config.lastFMSettings.LAST_FM_USERNAME) || string.IsNullOrWhiteSpace(Program.config.lastFMSettings.LAST_FM_PASSWORD))
+            if (string.IsNullOrWhiteSpace(ConfigExt.LastFMSettings.LAST_FM_USERNAME) || string.IsNullOrWhiteSpace(ConfigExt.LastFMSettings.LAST_FM_PASSWORD))
             {
                 AskForCredentials();
             }
@@ -32,16 +32,16 @@ namespace RockSniffer.LastFM
             string passwordUnhashed;
             try
             {
-                passwordUnhashed = Crypto.DecryptStringAES(Program.config.lastFMSettings.LAST_FM_PASSWORD, Program.config.lastFMSettings.LAST_FM_USERNAME + Utils.GetHardwareHash());
+                passwordUnhashed = Crypto.DecryptStringAES(ConfigExt.LastFMSettings.LAST_FM_PASSWORD, ConfigExt.LastFMSettings.LAST_FM_USERNAME);
             }
             catch (Exception ex)
             {
                 AskForCredentials(true);
 
-                passwordUnhashed = Crypto.DecryptStringAES(Program.config.lastFMSettings.LAST_FM_PASSWORD, Program.config.lastFMSettings.LAST_FM_USERNAME + Utils.GetHardwareHash());
+                passwordUnhashed = Crypto.DecryptStringAES(ConfigExt.LastFMSettings.LAST_FM_PASSWORD, ConfigExt.LastFMSettings.LAST_FM_USERNAME);
             }
-            
-            var response = Client.Auth.GetSessionTokenAsync(Program.config.lastFMSettings.LAST_FM_USERNAME, passwordUnhashed).Result;
+
+            var response = Client.Auth.GetSessionTokenAsync(ConfigExt.LastFMSettings.LAST_FM_USERNAME, passwordUnhashed).Result;
             if (response.Success)
             {
                 Logger.Log("[Last.FM] Received Ready from user {0}", Client.Auth.UserSession.Username);
@@ -50,10 +50,10 @@ namespace RockSniffer.LastFM
             {
                 Logger.Log("[Last.FM] Invalid Last.FM Credentials. Please run the program again and ensure you inputted the data correctly.");
 
-                Program.config.lastFMSettings.LAST_FM_USERNAME = "";
-                Program.config.lastFMSettings.LAST_FM_PASSWORD = "";
+                ConfigExt.LastFMSettings.LAST_FM_USERNAME = "";
+                ConfigExt.LastFMSettings.LAST_FM_PASSWORD = "";
 
-                Program.config.SaveLastFMSettings();
+                ConfigExt.SaveLastFMSettings();
 
                 return;
             }
@@ -67,7 +67,7 @@ namespace RockSniffer.LastFM
         {
             Logger.Log("[Last.FM] Last.FM Enabled but no user credentials exist.");
 
-            var username = !force ? Program.config.lastFMSettings.LAST_FM_USERNAME : "";
+            var username = !force ? ConfigExt.LastFMSettings.LAST_FM_USERNAME : "";
             while (string.IsNullOrWhiteSpace(username))
             {
                 Console.WriteLine("Last.FM Username: ");
@@ -81,12 +81,12 @@ namespace RockSniffer.LastFM
                 password = Console.ReadLine()?.Trim();
             }
 
-            var passwordHashed = Crypto.EncryptStringAES(password, username + Utils.GetHardwareHash());
+            var passwordHashed = Crypto.EncryptStringAES(password, username);
 
-            Program.config.lastFMSettings.LAST_FM_USERNAME = username;
-            Program.config.lastFMSettings.LAST_FM_PASSWORD = passwordHashed;
+            ConfigExt.LastFMSettings.LAST_FM_USERNAME = username;
+            ConfigExt.LastFMSettings.LAST_FM_PASSWORD = passwordHashed;
 
-            Program.config.SaveLastFMSettings();
+            ConfigExt.SaveLastFMSettings();
         }
 
         private void UpdatePresence()

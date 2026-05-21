@@ -1,5 +1,13 @@
-﻿using System;
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Net.Http;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using System.Threading.Tasks;
 using IF.Lastfm.Core.Api;
+using IF.Lastfm.Core.Api.Helpers;
 using IF.Lastfm.Core.Objects;
 using RockSnifferLib.Events;
 using RockSnifferLib.Logging;
@@ -12,6 +20,7 @@ namespace RockSniffer.LastFM
     public class LastFMHandler : IDisposable
     {
         private static readonly object Mutex = new();
+        private static readonly HttpClient Http = new() { DefaultRequestHeaders = { { "User-Agent", "RockSniffer/0.6.4" } } };
 
         private readonly LastfmClient Client;
         private RSMemoryReadout? Readout;
@@ -22,39 +31,23 @@ namespace RockSniffer.LastFM
 
         public LastFMHandler(Sniffer sniffer)
         {
-            Client = new LastfmClient(ConfigExt.LastFMSettings.LAST_FM_API_KEY, ConfigExt.LastFMSettings.LAST_FM_API_SECRET);
-
-            if (string.IsNullOrWhiteSpace(ConfigExt.LastFMSettings.LAST_FM_USERNAME) || string.IsNullOrWhiteSpace(ConfigExt.LastFMSettings.LAST_FM_PASSWORD))
+            if (string.IsNullOrWhiteSpace(ConfigExt.LastFMSettings.LAST_FM_API_KEY) ||
+                string.IsNullOrWhiteSpace(ConfigExt.LastFMSettings.LAST_FM_API_SECRET))
             {
-                AskForCredentials();
+                Logger.Log("[Last.FM] API key and secret are required. Fill them in config/lastFM.json and restart.");
+                return;
             }
 
-            string passwordUnhashed;
+            Client = new LastfmClient(ConfigExt.LastFMSettings.LAST_FM_API_KEY, ConfigExt.LastFMSettings.LAST_FM_API_SECRET);
+
             try
             {
-                passwordUnhashed = Crypto.DecryptStringAES(ConfigExt.LastFMSettings.LAST_FM_PASSWORD, ConfigExt.LastFMSettings.LAST_FM_USERNAME);
+                if (!AuthenticateAsync().Result)
+                    return;
             }
             catch (Exception ex)
             {
-                AskForCredentials(true);
-
-                passwordUnhashed = Crypto.DecryptStringAES(ConfigExt.LastFMSettings.LAST_FM_PASSWORD, ConfigExt.LastFMSettings.LAST_FM_USERNAME);
-            }
-
-            var response = Client.Auth.GetSessionTokenAsync(ConfigExt.LastFMSettings.LAST_FM_USERNAME, passwordUnhashed).Result;
-            if (response.Success)
-            {
-                Logger.Log("[Last.FM] Received Ready from user {0}", Client.Auth.UserSession.Username);
-            }
-            else
-            {
-                Logger.Log("[Last.FM] Invalid Last.FM Credentials. Please run the program again and ensure you inputted the data correctly.");
-
-                ConfigExt.LastFMSettings.LAST_FM_USERNAME = "";
-                ConfigExt.LastFMSettings.LAST_FM_PASSWORD = "";
-
-                ConfigExt.SaveLastFMSettings();
-
+                Logger.LogError("[Last.FM] Authentication failed: {0}", ex.InnerException?.Message ?? ex.Message);
                 return;
             }
 
@@ -63,30 +56,120 @@ namespace RockSniffer.LastFM
             sniffer.OnMemoryReadout += Sniffer_OnMemoryReadout;
         }
 
-        private static void AskForCredentials(bool force = false)
+        private async Task<bool> AuthenticateAsync()
         {
-            Logger.Log("[Last.FM] Last.FM Enabled but no user credentials exist.");
+            var sessionKey = ConfigExt.LastFMSettings.LAST_FM_SESSION_KEY;
 
-            var username = !force ? ConfigExt.LastFMSettings.LAST_FM_USERNAME : "";
-            while (string.IsNullOrWhiteSpace(username))
+            if (!string.IsNullOrWhiteSpace(sessionKey))
             {
-                Console.WriteLine("Last.FM Username: ");
-                username = Console.ReadLine()?.Trim();
+                ((LastAuth)Client.Auth).LoadSession(new LastUserSession { Token = sessionKey });
+                Logger.Log("[Last.FM] Session restored.");
+                return true;
             }
 
-            var password = "";
-            while (string.IsNullOrWhiteSpace(password))
+            return await DoWebAuthAsync();
+        }
+
+        private async Task<bool> DoWebAuthAsync()
+        {
+            Logger.Log("[Last.FM] No session found. Starting web authentication...");
+
+            var apiKey = ConfigExt.LastFMSettings.LAST_FM_API_KEY;
+            var apiSecret = ConfigExt.LastFMSettings.LAST_FM_API_SECRET;
+
+            // Step 1: get an unsigned token
+            var tokenSig = Sign(new Dictionary<string, string>
             {
-                Console.WriteLine("Last.FM Password: ");
-                password = Console.ReadLine()?.Trim();
+                ["api_key"] = apiKey,
+                ["method"] = "auth.getToken"
+            }, apiSecret);
+
+            var tokenUrl = $"https://ws.audioscrobbler.com/2.0/?method=auth.getToken&api_key={apiKey}&api_sig={tokenSig}&format=json";
+            var tokenResponse = await Http.GetAsync(tokenUrl);
+            var tokenJson = await tokenResponse.Content.ReadAsStringAsync();
+
+            if (!tokenResponse.IsSuccessStatusCode)
+            {
+                Logger.LogError("[Last.FM] Failed to get auth token (HTTP {0}): {1}", (int)tokenResponse.StatusCode, tokenJson);
+                return false;
             }
 
-            var passwordHashed = Crypto.EncryptStringAES(password, username);
+            var tokenDoc = JsonDocument.Parse(tokenJson);
 
-            ConfigExt.LastFMSettings.LAST_FM_USERNAME = username;
-            ConfigExt.LastFMSettings.LAST_FM_PASSWORD = passwordHashed;
+            if (!tokenDoc.RootElement.TryGetProperty("token", out var tokenElement))
+            {
+                Logger.LogError("[Last.FM] Failed to get auth token: {0}", tokenJson);
+                return false;
+            }
 
+            var token = tokenElement.GetString()!;
+            var authUrl = $"https://www.last.fm/api/auth/?api_key={apiKey}&token={token}";
+
+            Logger.Log("[Last.FM] Opening browser for authorization...");
+            Logger.Log("[Last.FM] If browser doesn't open, visit: https://www.last.fm/api/auth/?token={0}", token);
+
+            try { Process.Start(new ProcessStartInfo(authUrl) { UseShellExecute = true }); }
+            catch { }
+
+            Logger.Log("[Last.FM] Waiting for authorization in browser...");
+
+            // Step 2: poll until user approves (up to 5 minutes)
+            var sessionSig = Sign(new Dictionary<string, string>
+            {
+                ["api_key"] = apiKey,
+                ["method"] = "auth.getSession",
+                ["token"] = token
+            }, apiSecret);
+
+            var sessionUrl = $"https://ws.audioscrobbler.com/2.0/?method=auth.getSession&api_key={apiKey}&token={token}&api_sig={sessionSig}&format=json";
+
+            JsonElement sessionElement = default;
+            var deadline = DateTime.UtcNow.AddMinutes(5);
+            while (DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(2000);
+                var pollResponse = await Http.GetAsync(sessionUrl);
+                if (!pollResponse.IsSuccessStatusCode)
+                    continue;
+                var sessionJson = await pollResponse.Content.ReadAsStringAsync();
+                var sessionDoc = JsonDocument.Parse(sessionJson);
+                if (sessionDoc.RootElement.TryGetProperty("session", out sessionElement))
+                    break;
+                sessionElement = default;
+            }
+
+            if (sessionElement.ValueKind == JsonValueKind.Undefined)
+            {
+                Logger.LogError("[Last.FM] Authorization timed out. Restart to try again.");
+                return false;
+            }
+
+            var sessionKey = sessionElement.GetProperty("key").GetString()!;
+            var username = sessionElement.GetProperty("name").GetString()!;
+
+            ((LastAuth)Client.Auth).LoadSession(new LastUserSession { Token = sessionKey });
+
+            ConfigExt.LastFMSettings.LAST_FM_SESSION_KEY = sessionKey;
             ConfigExt.SaveLastFMSettings();
+
+            Logger.Log("[Last.FM] Authorized as {0}", username);
+            return true;
+        }
+
+        private static string Sign(Dictionary<string, string> parameters, string secret)
+        {
+            // Sort params alphabetically, concat key+value, append secret, md5
+            var keys = new List<string>(parameters.Keys);
+            keys.Sort(StringComparer.Ordinal);
+
+            var sb = new StringBuilder();
+            foreach (var k in keys)
+                sb.Append(k).Append(parameters[k]);
+            sb.Append(secret);
+
+            using var md5 = MD5.Create();
+            var hash = md5.ComputeHash(Encoding.UTF8.GetBytes(sb.ToString()));
+            return Convert.ToHexString(hash).ToLowerInvariant();
         }
 
         private void UpdatePresence()
@@ -119,13 +202,9 @@ namespace RockSniffer.LastFM
                         var scrobbleResponse = Client.Scrobbler.ScrobbleAsync(scrobble).Result;
 
                         if (scrobbleResponse.Success)
-                        {
                             Logger.Log("[Last.FM] Scrobbled " + SongDetails.songName + " - " + SongDetails.artistName);
-                        }
                         else
-                        {
                             Logger.Log("[Last.FM] Failed Scrobble " + SongDetails.songName + " - " + SongDetails.artistName);
-                        }
 
                         Scrobbled = true;
                     }
@@ -141,13 +220,9 @@ namespace RockSniffer.LastFM
                 var response = Client.Track.UpdateNowPlayingAsync(scrobble).Result;
 
                 if (response.Success)
-                {
                     Logger.Log("[Last.FM] Now Playing " + SongDetails.songName + " - " + SongDetails.artistName);
-                }
                 else
-                {
                     Logger.Log("[Last.FM] Failed Now Playing Update " + SongDetails.songName + " - " + SongDetails.artistName);
-                }
 
                 LastScrobbled = scrobble;
             }
